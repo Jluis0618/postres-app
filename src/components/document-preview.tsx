@@ -1,5 +1,5 @@
 import { CakeSlice } from "lucide-react"
-import type { Customer, OrderItem } from "@/lib/demo-data"
+import type { Customer, LineItem } from "@/lib/types"
 import { formatMoney, formatShortDate } from "@/lib/format"
 
 // Cómo se ve la cotización o factura que recibe el cliente (y su PDF).
@@ -17,13 +17,13 @@ export function DocumentPreview({
 }: {
   kind: "COTIZACIÓN" | "FACTURA"
   number: string
-  business: { business_name: string; phone: string; address: string; tax_id: string }
+  business: { business_name: string; phone: string | null; address: string | null; tax_id: string | null }
   customer: Customer
   dates: { label: string; value: string }[]
-  items: OrderItem[]
+  items: LineItem[]
   totals: { subtotal: number; discount: number; tax: number; total: number }
   paid?: number
-  note: string
+  note: string | null
   stamp?: { label: string; className: string }
 }) {
   return (
@@ -43,7 +43,7 @@ export function DocumentPreview({
           <div>
             <div className="font-heading text-xl font-semibold text-neutral-900">{business.business_name}</div>
             <div className="text-xs text-neutral-500">
-              RNC {business.tax_id} · {business.phone}
+              {[business.tax_id && `RNC ${business.tax_id}`, business.phone].filter(Boolean).join(" · ")}
             </div>
             <div className="text-xs text-neutral-500">{business.address}</div>
           </div>
@@ -58,7 +58,8 @@ export function DocumentPreview({
         <div className="rounded-lg bg-neutral-50 p-3">
           <div className="text-[11px] font-semibold tracking-wider text-neutral-500 uppercase">Cliente</div>
           <div className="mt-1 font-medium text-neutral-900">{customer.name}</div>
-          <div className="text-neutral-600">{customer.phone}</div>
+          {customer.phone && <div className="text-neutral-600">{customer.phone}</div>}
+          {customer.tax_id && <div className="text-neutral-600">RNC/Cédula {customer.tax_id}</div>}
           {customer.address && <div className="text-neutral-600">{customer.address}</div>}
         </div>
         <dl className="grid content-start gap-1 sm:justify-items-end">
@@ -87,7 +88,7 @@ export function DocumentPreview({
                 <div className="font-medium text-neutral-900">{i.description}</div>
                 {i.customization && <div className="text-xs text-neutral-500">{i.customization}</div>}
               </td>
-              <td className="py-3 text-right tabular-nums">{i.quantity}</td>
+              <td className="py-3 text-right tabular-nums">{Number(i.quantity)}</td>
               <td className="hidden py-3 text-right tabular-nums sm:table-cell">{formatMoney(i.unit_price)}</td>
               <td className="py-3 text-right font-medium tabular-nums">{formatMoney(i.quantity * i.unit_price)}</td>
             </tr>
@@ -116,7 +117,7 @@ export function DocumentPreview({
         </dl>
       </div>
 
-      <p className="mt-10 border-t border-dashed border-neutral-200 pt-4 text-center text-xs text-neutral-500">{note}</p>
+      {note && <p className="mt-10 border-t border-dashed border-neutral-200 pt-4 text-center text-xs whitespace-pre-line text-neutral-500">{note}</p>}
     </div>
   )
 }

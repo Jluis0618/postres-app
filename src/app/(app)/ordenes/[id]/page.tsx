@@ -4,52 +4,24 @@ import { ChevronLeft, Link2, MapPin, MessageCircle, Phone, Store, Truck } from "
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
-import {
-  getCustomer,
-  getOrder,
-  getProduct,
-  getRecipe,
-  getSupply,
-  invoiceForOrder,
-  orderPaid,
-  orderTotals,
-  settings,
-  type Order,
-} from "@/lib/demo-data"
-import { PaymentDialog } from "@/components/payment-dialog"
-import { whatsappLink } from "@/lib/demo"
+import { DeletePaymentButton, PaymentDialog } from "@/components/payment-dialog"
+import { requireStaff } from "@/lib/auth"
+import { getOrder, getSettings, listProducts } from "@/lib/data"
 import { formatDay, formatMoney, formatShortDate, formatTime, paymentMethod } from "@/lib/format"
+import { firstName, whatsappLink } from "@/lib/whatsapp"
 import { OrderActions } from "./order-actions"
 
-// Insumos que la orden descontó al pasar a preparación, según las recetas.
-function consumedSupplies(order: Order) {
-  const totals = new Map<string, number>()
-  for (const item of order.items) {
-    const recipe = getRecipe(item.product_id)
-    for (const r of recipe?.items ?? []) {
-      totals.set(r.supply_id, (totals.get(r.supply_id) ?? 0) + (r.quantity * item.quantity) / recipe!.recipe_yield)
-    }
-  }
-  return [...totals].map(([id, quantity]) => {
-    const s = getSupply(id)
-    return { name: s.name, unit: s.unit, quantity }
-  })
-}
-
-// Para la demo, el cheesecake de ORD-0014 no tiene suficiente queso crema.
-const demoShortages: Record<string, { name: string; text: string }[]> = {
-  o14: [{ name: "Queso crema", text: "230 g" }],
-}
-
 export default async function OrderPage({ params }: PageProps<"/ordenes/[id]">) {
+  await requireStaff()
   const { id } = await params
-  const order = getOrder(id)
-  if (!order) notFound()
+  const [found, settings, products] = await Promise.all([getOrder(id), getSettings(), listProducts()])
+  if (!found) notFound()
+  const { order, consumed } = found
 
-  const customer = getCustomer(order.customer_id)
-  const totals = orderTotals(order)
-  const paid = orderPaid(order)
-  const invoice = invoiceForOrder(order.id)
+  const emojiById = new Map(products.map((p) => [p.id, p.emoji]))
+  const paid = order.payments.reduce((s, p) => s + Number(p.amount), 0)
+  const invoice = order.invoices.find((i) => i.status === "issued") ?? null
+  const customer = order.customer
 
   return (
     <>
@@ -72,23 +44,23 @@ export default async function OrderPage({ params }: PageProps<"/ordenes/[id]">) 
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-        <div className="flex flex-col gap-6">
+        <div className="flex min-w-0 flex-col gap-6">
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Productos</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
-              {order.items.map((item, i) => (
-                <div key={i} className="flex gap-3">
+              {order.items.map((item) => (
+                <div key={item.id} className="flex gap-3">
                   <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-accent text-xl">
-                    {getProduct(item.product_id).emoji}
+                    {(item.product_id && emojiById.get(item.product_id)) || "🧾"}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex justify-between gap-3">
                       <span className="font-medium">
-                        {item.quantity} × {item.description}
+                        {Number(item.quantity)} × {item.description}
                       </span>
-                      <span className="tabular-nums">{formatMoney(item.quantity * item.unit_price)}</span>
+                      <span className="tabular-nums">{formatMoney(item.total)}</span>
                     </div>
                     <div className="text-sm text-muted-foreground">{formatMoney(item.unit_price)} c/u</div>
                     {item.customization && (
@@ -101,12 +73,12 @@ export default async function OrderPage({ params }: PageProps<"/ordenes/[id]">) 
               ))}
               <Separator />
               <dl className="flex flex-col gap-1.5 text-sm">
-                <Row label="Subtotal" value={formatMoney(totals.subtotal)} />
-                {totals.discount > 0 && <Row label="Descuento" value={`− ${formatMoney(totals.discount)}`} />}
-                <Row label="ITBIS" value={totals.tax > 0 ? formatMoney(totals.tax) : "No aplica"} />
+                <Row label="Subtotal" value={formatMoney(order.subtotal)} />
+                {order.discount > 0 && <Row label="Descuento" value={`− ${formatMoney(order.discount)}`} />}
+                <Row label="ITBIS" value={order.tax > 0 ? formatMoney(order.tax) : "No aplica"} />
                 <div className="flex justify-between pt-1 text-base font-semibold">
                   <dt>Total</dt>
-                  <dd className="tabular-nums">{formatMoney(totals.total)}</dd>
+                  <dd className="tabular-nums">{formatMoney(order.total)}</dd>
                 </div>
               </dl>
             </CardContent>
@@ -118,22 +90,25 @@ export default async function OrderPage({ params }: PageProps<"/ordenes/[id]">) 
                 <CardTitle className="text-lg">Cliente</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-2 text-sm">
-                <div className="text-base font-medium">{customer.name}</div>
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Phone className="size-4" /> {customer.phone}
-                </div>
-                <Button variant="outline" className="mt-2 h-10 w-fit" asChild>
-                  <a
-                    href={whatsappLink(
-                      customer.phone,
-                      `Hola ${customer.name.split(" ")[0]}, te escribo de ${settings.business_name} sobre tu pedido ${order.number}.`
-                    )}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <MessageCircle /> Escribir por WhatsApp
-                  </a>
-                </Button>
+                <Link href={`/clientes/${customer.id}`} className="text-base font-medium hover:text-primary hover:underline">
+                  {customer.name}
+                </Link>
+                {customer.phone && (
+                  <>
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Phone className="size-4" /> {customer.phone}
+                    </div>
+                    <Button variant="outline" className="mt-2 h-10 w-fit" asChild>
+                      <a
+                        href={whatsappLink(customer.phone, `Hola ${firstName(customer.name)}, te escribo de ${settings.business_name} sobre tu pedido ${order.number}.`)}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <MessageCircle /> Escribir por WhatsApp
+                      </a>
+                    </Button>
+                  </>
+                )}
               </CardContent>
             </Card>
             <Card>
@@ -150,19 +125,14 @@ export default async function OrderPage({ params }: PageProps<"/ordenes/[id]">) 
                     <MapPin className="mt-0.5 size-4 shrink-0" /> {order.delivery_address}
                   </div>
                 )}
-                {order.notes && <p className="text-muted-foreground">📝 {order.notes}</p>}
+                {order.notes && <p className="whitespace-pre-line text-muted-foreground">📝 {order.notes}</p>}
               </CardContent>
             </Card>
           </div>
         </div>
 
         <div className="flex flex-col gap-6">
-          <OrderActions
-            initialStatus={order.status}
-            missing={demoShortages[order.id] ?? []}
-            hasInvoice={!!invoice}
-            consumed={consumedSupplies(order)}
-          />
+          <OrderActions orderId={order.id} status={order.status} invoice={invoice} consumed={consumed} />
 
           <Card>
             <CardHeader>
@@ -173,32 +143,31 @@ export default async function OrderPage({ params }: PageProps<"/ordenes/[id]">) 
                 <div className="flex justify-between">
                   <span>Pagado</span>
                   <span className="font-medium tabular-nums">
-                    {formatMoney(paid)} de {formatMoney(totals.total)}
+                    {formatMoney(paid)} de {formatMoney(order.total)}
                   </span>
                 </div>
                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
-                  <div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.min((paid / totals.total) * 100, 100)}%` }} />
+                  <div className="h-full rounded-full bg-emerald-500" style={{ width: `${order.total > 0 ? Math.min((paid / order.total) * 100, 100) : 0}%` }} />
                 </div>
               </div>
-              {order.payments.map((p, i) => (
-                <div key={i} className="flex justify-between text-muted-foreground">
-                  <span>
-                    {i === 0 && !invoice ? "Anticipo" : "Pago"} · {paymentMethod[p.method]} · {formatShortDate(p.paid_at)}
+              {order.payments.map((p) => (
+                <div key={p.id} className="flex items-center justify-between gap-2 text-muted-foreground">
+                  <span className="min-w-0 truncate">
+                    {paymentMethod[p.method]} · {formatShortDate(p.paid_at)}
+                    {p.reference ? ` · ${p.reference}` : ""}
                   </span>
-                  <span className="tabular-nums">{formatMoney(p.amount)}</span>
+                  <span className="flex items-center gap-1">
+                    <span className="tabular-nums">{formatMoney(p.amount)}</span>
+                    <DeletePaymentButton paymentId={p.id} label={`el pago de ${formatMoney(p.amount)}`} />
+                  </span>
                 </div>
               ))}
-              {order.status !== "cancelled" && paid < totals.total && (
-                <PaymentDialog reference={order.number} total={totals.total} paid={paid}>
+              {order.status !== "cancelled" && paid < order.total && (
+                <PaymentDialog orderId={order.id} reference={order.number} total={Number(order.total)} paid={paid}>
                   <Button variant="outline" className="h-10">
                     {invoice ? "Registrar pago" : "Registrar pago o anticipo"}
                   </Button>
                 </PaymentDialog>
-              )}
-              {invoice && (
-                <p className="text-muted-foreground">
-                  Factura <span className="font-medium text-foreground">{invoice.number}</span>
-                </p>
               )}
             </CardContent>
           </Card>

@@ -1,5 +1,5 @@
 import { CakeSlice } from "lucide-react"
-import { settings } from "@/lib/demo-data"
+import { APP_NAME } from "@/lib/brand"
 import { LoginForm } from "./login-form"
 
 export const metadata = { title: "Entrar" }
@@ -12,7 +12,7 @@ export default function LoginPage() {
           <span className="flex size-10 items-center justify-center rounded-xl bg-primary-foreground/15">
             <CakeSlice className="size-5" />
           </span>
-          <span className="font-heading text-xl font-semibold">{settings.business_name}</span>
+          <span className="font-heading text-xl font-semibold">{APP_NAME}</span>
         </div>
         <div className="relative z-10 max-w-sm">
           <p className="font-heading text-4xl leading-tight font-semibold">Tus órdenes, tu inventario y tus ventas en un solo lugar.</p>
@@ -29,7 +29,7 @@ export default function LoginPage() {
             <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground">
               <CakeSlice className="size-5" />
             </span>
-            <span className="font-heading text-xl font-semibold">{settings.business_name}</span>
+            <span className="font-heading text-xl font-semibold">{APP_NAME}</span>
           </div>
           <h1 className="font-heading text-3xl font-semibold tracking-tight">Bienvenida 👋</h1>
           <p className="mt-1 mb-8 text-muted-foreground">Entra con tu correo y contraseña.</p>

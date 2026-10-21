@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Ban } from "lucide-react"
+import { Ban, LoaderCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -15,12 +15,14 @@ import {
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { demoSaved } from "@/lib/demo"
+import { voidInvoice } from "@/app/actions/sales"
+import { useAction } from "@/lib/use-action"
 
 // Una factura no se edita ni se borra: se anula y, si hace falta, se crea otra desde la orden.
-export function VoidInvoiceDialog({ number }: { number: string }) {
+export function VoidInvoiceDialog({ invoiceId, number }: { invoiceId: string; number: string }) {
   const [open, setOpen] = useState(false)
   const [reason, setReason] = useState("")
+  const { pending, run } = useAction()
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -32,7 +34,7 @@ export function VoidInvoiceDialog({ number }: { number: string }) {
         <DialogHeader>
           <DialogTitle className="font-heading text-xl">¿Anular {number}?</DialogTitle>
           <DialogDescription>
-            La factura queda marcada como anulada y deja de contar en las ventas. No se puede deshacer. Si hubo un error, después puedes facturar la orden otra vez.
+            La factura queda anulada y deja de contar en las ventas. No se puede deshacer. Después puedes facturar la orden otra vez.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-2">
@@ -48,12 +50,13 @@ export function VoidInvoiceDialog({ number }: { number: string }) {
           <Button
             variant="destructive"
             className="h-11"
-            disabled={!reason.trim()}
-            onClick={() => {
-              setOpen(false)
-              demoSaved(`${number} anulada`)
+            disabled={!reason.trim() || pending}
+            onClick={async () => {
+              const r = await run(() => voidInvoice(invoiceId, reason), `${number} anulada`)
+              if (r.ok) setOpen(false)
             }}
           >
+            {pending && <LoaderCircle className="animate-spin" />}
             Anular
           </Button>
         </DialogFooter>

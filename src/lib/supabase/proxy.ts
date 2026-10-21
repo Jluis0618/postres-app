@@ -1,7 +1,10 @@
 import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
 
-// Refresca la sesión de Supabase en cada request y guarda las cookies nuevas.
+// Páginas que se ven sin sesión. La API tiene su propia llave y no usa la sesión.
+const PUBLIC_PATHS = ["/login", "/auth/", "/cambiar-clave", "/api/", "/manifest.webmanifest", "/icons/", "/icon", "/apple-icon", "/sw.js", "/offline.html"]
+
+// Refresca la sesión de Supabase en cada request y manda al login a quien no tenga sesión.
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request })
 
@@ -32,9 +35,23 @@ export async function updateSession(request: NextRequest) {
 
   // No poner código entre createServerClient y getClaims():
   // getClaims() es lo que valida y refresca el token.
-  await supabase.auth.getClaims()
+  const { data } = await supabase.auth.getClaims()
 
-  // Cuando exista la página de login, aquí redirigiremos a quien no tenga sesión.
+  const path = request.nextUrl.pathname
+  const isPublic = PUBLIC_PATHS.some((p) => path === p || path.startsWith(p))
+
+  // Al redirigir se conservan las cookies de sesión que se acaban de refrescar.
+  function redirectTo(pathname: string) {
+    const url = request.nextUrl.clone()
+    url.pathname = pathname
+    url.search = ""
+    const redirect = NextResponse.redirect(url)
+    response.cookies.getAll().forEach((cookie) => redirect.cookies.set(cookie))
+    return redirect
+  }
+
+  if (!data?.claims && !isPublic) return redirectTo("/login")
+  if (data?.claims && path === "/login") return redirectTo("/")
 
   return response
 }

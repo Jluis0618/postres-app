@@ -1,15 +1,18 @@
 import { BottomNav, Sidebar } from "@/components/app-nav"
-import { settings } from "@/lib/demo-data"
+import { requireStaff } from "@/lib/auth"
+import { getSettings } from "@/lib/data"
 
 // Todas las pantallas internas: menú lateral (tablet y computadora) o barra inferior (celular).
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+export default async function AppLayout({ children }: { children: React.ReactNode }) {
+  // Primero el usuario: sin rol no puede leer la configuración y debe ir a "sin acceso".
+  const user = await requireStaff()
+  const settings = await getSettings()
+  const roleLabel = user.role === "admin" ? "Administradora" : "Ayudante"
+
   return (
     <>
-      <Sidebar businessName={settings.business_name} />
+      <Sidebar businessName={settings.business_name} userName={user.name} roleLabel={roleLabel} isAdmin={user.role === "admin"} />
       <div className="md:pl-60">
-        <div className="bg-accent px-4 py-1.5 text-center text-xs text-accent-foreground">
-          Vista de demostración con datos de ejemplo. Todavía no está conectada a Supabase.
-        </div>
         <main className="mx-auto w-full max-w-6xl px-4 pt-6 pb-28 sm:px-6 md:pb-12 lg:px-8">{children}</main>
       </div>
       <BottomNav />

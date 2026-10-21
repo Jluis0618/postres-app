@@ -4,51 +4,60 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { PageHeader } from "@/components/page-header"
 import { SegmentedLinks } from "@/components/segmented-links"
 import { StatusBadge } from "@/components/status-badge"
-import { customers, getCustomer, getProduct, invoices, orders, orderTotals, products, salesByMonth, topProducts } from "@/lib/demo-data"
+import { requireAdmin } from "@/lib/auth"
+import { averageMargin, listCustomers, listReceivables, salesByMonth, topCustomers, topProducts } from "@/lib/data"
 import { formatMoney, formatShortDate, paymentStatus } from "@/lib/format"
 
+export const metadata = { title: "Reportes" }
+
 const ranges = [
-  { key: "mes", label: "Este mes" },
-  { key: "3m", label: "3 meses" },
-  { key: "6m", label: "6 meses" },
+  { key: "mes", label: "Este mes", months: 1 },
+  { key: "3m", label: "3 meses", months: 3 },
+  { key: "6m", label: "6 meses", months: 6 },
+  { key: "12m", label: "12 meses", months: 12 },
 ] as const
 
 export default async function ReportsPage({ searchParams }: PageProps<"/reportes">) {
+  await requireAdmin()
   const { rango } = await searchParams
-  const range = ranges.some((r) => r.key === rango) ? (rango as string) : "6m"
+  const range = ranges.find((r) => r.key === rango) ?? ranges[2]
 
-  const current = salesByMonth.at(-1)!
-  const previous = salesByMonth.at(-2)!
-  const change = Math.round(((current.total - previous.total) / previous.total) * 100)
-  const monthOrders = orders.filter((o) => o.status !== "cancelled").length
-  const avgTicket = Math.round(current.total / Math.max(invoices.length, 1))
-  const months = range === "mes" ? salesByMonth.slice(-1) : range === "3m" ? salesByMonth.slice(-3) : salesByMonth
-  const maxMonth = Math.max(...months.map((m) => m.total))
-  const gridSteps = [0.25, 0.5, 0.75, 1]
-  const maxProduct = Math.max(...topProducts.map((p) => p.total))
-  const avgMargin = Math.round(
-    (products.reduce((sum, p) => sum + (p.price - p.unit_cost) / p.price, 0) / products.length) * 100
-  )
+  // Siempre se piden al menos 2 meses para comparar con el mes anterior.
+  const { months: allMonths } = await salesByMonth(Math.max(range.months, 2))
+  const months = allMonths.slice(-range.months)
+  const rangeFrom = `${months[0].key}-01`
+  const [products, customersTop, receivables, margin, customers] = await Promise.all([
+    topProducts(rangeFrom),
+    topCustomers(rangeFrom),
+    listReceivables(),
+    averageMargin(),
+    listCustomers(),
+  ])
 
-  const byCustomer = customers
-    .map((c) => ({
-      customer: c,
-      total: orders.filter((o) => o.customer_id === c.id && o.status !== "cancelled").reduce((s, o) => s + orderTotals(o).total, 0),
-    }))
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 5)
-  const receivable = invoices.filter((i) => i.payment_status !== "paid")
+  const current = allMonths.at(-1)!
+  const previous = allMonths.at(-2)!
+  const change = previous.total > 0 ? Math.round(((current.total - previous.total) / previous.total) * 100) : null
+  const rangeTotal = months.reduce((s, m) => s + m.total, 0)
+  const maxMonth = Math.max(...months.map((m) => m.total), 1)
+  const maxProduct = Math.max(...products.map((p) => p.total), 1)
+  const nameById = new Map(customers.map((c) => [c.id, c.name]))
+  const owed = receivables.reduce((s, r) => s + Number(r.balance), 0)
 
   return (
     <>
       <PageHeader title="Reportes" description="Cuánto vendes, qué se vende más y quién te debe" />
-      <SegmentedLinks basePath="/reportes" param="rango" current={range} options={[...ranges]} />
+      <SegmentedLinks basePath="/reportes" param="rango" current={range.key} options={ranges.map(({ key, label }) => ({ key, label }))} />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="Ventas del mes" value={formatMoney(current.total)} hint={`${change >= 0 ? "▲" : "▼"} ${Math.abs(change)}% vs. ${previous.month.toLowerCase()}`} good={change >= 0} />
-        <Kpi label="Órdenes" value={String(monthOrders)} hint="este mes" />
-        <Kpi label="Venta promedio" value={formatMoney(avgTicket)} hint="por factura" />
-        <Kpi label="Margen promedio" value={`${avgMargin}%`} hint="según las recetas" />
+        <Kpi
+          label="Ventas de este mes"
+          value={formatMoney(current.total)}
+          hint={change === null ? "sin mes anterior para comparar" : `${change >= 0 ? "▲" : "▼"} ${Math.abs(change)}% vs. ${previous.label.toLowerCase()}`}
+          good={change === null ? undefined : change >= 0}
+        />
+        <Kpi label={`Ventas (${range.label.toLowerCase()})`} value={formatMoney(rangeTotal)} hint="facturas vigentes" />
+        <Kpi label="Por cobrar" value={formatMoney(owed)} hint={`${receivables.length} ${receivables.length === 1 ? "factura" : "facturas"}`} />
+        <Kpi label="Margen promedio" value={margin === null ? "—" : `${margin}%`} hint="productos con receta" />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[3fr_2fr]">
@@ -59,10 +68,10 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reportes
           </CardHeader>
           <CardContent>
             <div className="relative h-56">
-              {gridSteps.map((g) => (
+              {[0.25, 0.5, 0.75, 1].map((g) => (
                 <div key={g} className="absolute inset-x-0 border-t border-dashed border-border" style={{ bottom: `${g * 100}%` }}>
                   <span className="absolute -top-2.5 left-0 bg-card pr-1 text-[10px] text-muted-foreground tabular-nums">
-                    {Math.round((maxMonth * g) / 1000)}k
+                    {maxMonth * g >= 1000 ? `${Math.round((maxMonth * g) / 1000)}k` : Math.round(maxMonth * g)}
                   </span>
                 </div>
               ))}
@@ -70,7 +79,7 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reportes
                 {months.map((m, i) => {
                   const last = i === months.length - 1
                   return (
-                    <div key={m.month} className="group relative flex h-full flex-1 flex-col items-center justify-end">
+                    <div key={m.key} className="group relative flex h-full flex-1 flex-col items-center justify-end">
                       <span
                         className={cn(
                           "pointer-events-none absolute z-10 rounded-md bg-popover px-2 py-1 text-xs font-medium whitespace-nowrap text-popover-foreground shadow-md ring-1 ring-foreground/10 tabular-nums transition-opacity",
@@ -82,7 +91,7 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reportes
                       </span>
                       <div
                         className={cn("w-full max-w-14 rounded-t-[4px] transition-colors", last ? "bg-primary" : "bg-primary/35 group-hover:bg-primary/60")}
-                        style={{ height: `${(m.total / maxMonth) * 100}%` }}
+                        style={{ height: `${Math.max((m.total / maxMonth) * 100, m.total > 0 ? 2 : 0)}%` }}
                       />
                     </div>
                   )
@@ -91,8 +100,8 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reportes
             </div>
             <div className="mt-2 flex gap-3 pl-8">
               {months.map((m) => (
-                <span key={m.month} className="flex-1 text-center text-xs text-muted-foreground">
-                  {m.month}
+                <span key={m.key} className="flex-1 text-center text-xs text-muted-foreground">
+                  {m.label}
                 </span>
               ))}
             </div>
@@ -105,23 +114,19 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reportes
             <CardDescription>Por ventas en RD$</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3.5">
-            {topProducts.map((t) => {
-              const p = getProduct(t.product_id)
-              return (
-                <div key={t.product_id} className="group" title={`${p.name}: ${t.units} vendidos, ${formatMoney(t.total)}`}>
-                  <div className="mb-1 flex justify-between gap-2 text-sm">
-                    <span className="truncate">
-                      {p.emoji} {p.name}
-                    </span>
-                    <span className="text-muted-foreground tabular-nums">{formatMoney(t.total)}</span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-muted">
-                    <div className="h-full rounded-full bg-primary/70 transition-colors group-hover:bg-primary" style={{ width: `${(t.total / maxProduct) * 100}%` }} />
-                  </div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">{t.units} vendidos</div>
+            {products.length === 0 && <p className="text-sm text-muted-foreground">Todavía no hay ventas en este periodo.</p>}
+            {products.map((p) => (
+              <div key={p.name} className="group" title={`${p.name}: ${p.units} vendidos, ${formatMoney(p.total)}`}>
+                <div className="mb-1 flex justify-between gap-2 text-sm">
+                  <span className="truncate">{p.name}</span>
+                  <span className="text-muted-foreground tabular-nums">{formatMoney(p.total)}</span>
                 </div>
-              )
-            })}
+                <div className="h-2 overflow-hidden rounded-full bg-muted">
+                  <div className="h-full rounded-full bg-primary/70 transition-colors group-hover:bg-primary" style={{ width: `${(p.total / maxProduct) * 100}%` }} />
+                </div>
+                <div className="mt-0.5 text-xs text-muted-foreground">{p.units} vendidos</div>
+              </div>
+            ))}
           </CardContent>
         </Card>
       </div>
@@ -132,11 +137,12 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reportes
             <CardTitle className="text-lg">Mejores clientes</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col divide-y">
-            {byCustomer.map(({ customer, total }, i) => (
-              <Link key={customer.id} href={`/clientes/${customer.id}`} className="flex items-center gap-3 py-2.5 hover:text-primary">
+            {customersTop.length === 0 && <p className="text-sm text-muted-foreground">Todavía no hay ventas en este periodo.</p>}
+            {customersTop.map((c, i) => (
+              <Link key={c.id} href={`/clientes/${c.id}`} className="flex items-center gap-3 py-2.5 hover:text-primary">
                 <span className="w-5 text-sm text-muted-foreground tabular-nums">{i + 1}</span>
-                <span className="flex-1 truncate text-sm font-medium">{customer.name}</span>
-                <span className="text-sm tabular-nums">{formatMoney(total)}</span>
+                <span className="flex-1 truncate text-sm font-medium">{c.name}</span>
+                <span className="text-sm tabular-nums">{formatMoney(c.total)}</span>
               </Link>
             ))}
           </CardContent>
@@ -146,20 +152,21 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reportes
           <CardHeader>
             <CardTitle className="text-lg">Cuentas por cobrar</CardTitle>
             <CardDescription>
-              {formatMoney(receivable.reduce((s, i) => s + i.total - i.paid, 0))} en {receivable.length} facturas
+              {formatMoney(owed)} en {receivables.length} {receivables.length === 1 ? "factura" : "facturas"}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col divide-y">
-            {receivable.map((inv) => (
-              <Link key={inv.id} href={`/facturas/${inv.id}`} className="flex items-center gap-3 py-2.5 hover:text-primary">
+            {receivables.length === 0 && <p className="text-sm text-muted-foreground">Nadie te debe. 🎉</p>}
+            {receivables.map((inv) => (
+              <Link key={inv.invoice_id} href={`/facturas/${inv.invoice_id}`} className="flex items-center gap-3 py-2.5 hover:text-primary">
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">{getCustomer(inv.customer_id).name}</div>
+                  <div className="truncate text-sm font-medium">{nameById.get(inv.customer_id) ?? "Cliente"}</div>
                   <div className="text-xs text-muted-foreground">
                     {inv.number} · {formatShortDate(inv.issued_on)}
                   </div>
                 </div>
                 <StatusBadge {...paymentStatus[inv.payment_status]} />
-                <span className="w-24 text-right text-sm font-medium tabular-nums">{formatMoney(inv.total - inv.paid)}</span>
+                <span className="w-24 text-right text-sm font-medium tabular-nums">{formatMoney(inv.balance)}</span>
               </Link>
             ))}
           </CardContent>
@@ -175,9 +182,7 @@ function Kpi({ label, value, hint, good }: { label: string; value: string; hint:
       <CardContent>
         <div className="text-sm text-muted-foreground">{label}</div>
         <div className="mt-1 font-heading text-2xl font-semibold tabular-nums sm:text-3xl">{value}</div>
-        <div className={cn("mt-1 text-xs", good === undefined ? "text-muted-foreground" : good ? "text-emerald-700 dark:text-emerald-400" : "text-destructive")}>
-          {hint}
-        </div>
+        <div className={cn("mt-1 text-xs", good === undefined ? "text-muted-foreground" : good ? "text-emerald-700 dark:text-emerald-400" : "text-destructive")}>{hint}</div>
       </CardContent>
     </Card>
   )

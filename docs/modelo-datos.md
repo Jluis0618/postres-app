@@ -166,3 +166,18 @@ La API key del sistema de comisiones va en una variable de entorno del servidor,
 4. La orden **se convierte en factura** (una factura por orden). Solo se permite con la orden en `ready` o `delivered`.
 5. Cuando el `payment_status` de una factura de origen `commissions` pasa a `paid`, se crea un registro en `webhook_deliveries`.
 6. Los precios se **copian** a la orden y a la factura. Si mañana cambia el precio de un producto, lo ya vendido no cambia.
+
+## Funciones que usa la app (migración `20261021120000_app_functions.sql`)
+
+Guardan un documento completo en un solo paso: o se guarda todo, o nada.
+
+| Función | Qué hace |
+|---|---|
+| `create_order(orden, ítems, anticipo)` | Crea la orden con sus productos y, si hay, el anticipo. Si un ítem trae `product_id`, el nombre y el precio salen del catálogo |
+| `create_quote(cotización, ítems)` | Igual, para cotizaciones |
+| `convert_quote_to_order(...)` | Ahora también copia la personalización de cada producto |
+| `save_product(producto, receta)` | Crea o edita un producto y reemplaza su receta completa |
+| `record_purchase(compra, ítems)` | Registra una compra con uno o varios insumos |
+| `find_or_create_customer(nombre, teléfono, …)` | Para la API: reconoce al cliente por los últimos 10 dígitos del teléfono o lo crea |
+
+**Columnas nuevas:** `profiles.email`, `quote_items.customization`, `products.emoji` (ícono del producto, por defecto 🎂).

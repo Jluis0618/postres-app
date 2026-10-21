@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { cn } from "cn"
 import { Input } from "@/components/ui/input"
-import type { SupplyUnit } from "@/lib/demo-data"
+import type { SupplyUnit } from "@/lib/types"
 
 // Unidades que se pueden escribir para cada unidad base, con su factor.
 const options: Record<SupplyUnit, { label: string; factor: number }[]> = {

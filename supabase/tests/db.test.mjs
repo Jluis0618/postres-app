@@ -11,6 +11,7 @@ let fails = 0
 const ok = (cond, msg) => { console.log((cond ? "  ✅ " : "  ❌ ") + msg); if (!cond) fails++ }
 const one = async (sql, p) => (await db.query(sql, p)).rows[0]
 const val = async (sql, p) => Object.values((await db.query(sql, p)).rows[0] ?? {})[0]
+const round2 = (n) => Math.round(n * 100) / 100
 const err = async (sql, p) => { try { await db.query(sql, p); return null } catch (e) { return e.message } }
 
 // --- Simula lo que Supabase ya trae: schema auth, roles y permisos por defecto ---
@@ -138,7 +139,48 @@ ok((await err(`insert into quote_items (quote_id, description, quantity, unit_pr
 console.log("\n9. Ventas")
 ok(Number(await val(`select total from sales_by_day`)) === 1500, "ventas del día = 1500")
 
-console.log("\n10. Permisos")
+console.log("\n10. Funciones de la app")
+ok((await val(`select email from profiles where id=$1`, [mom])) === "mama@x.com", "el perfil guarda el correo")
+const o5 = await val(`select create_order($1, $2, $3)`, [
+  JSON.stringify({ customer_id: cli, delivery_at: new Date(Date.now() + 86400000).toISOString(), delivery_type: "delivery", delivery_address: "Calle 1", discount: 100 }),
+  JSON.stringify([{ product_id: torta, quantity: 1, customization: "Feliz cumple" }, { description: "Topper especial", quantity: 2, unit_price: 150 }]),
+  JSON.stringify({ amount: 1000, method: "transfer" }),
+])
+const o5row = await one(`select status, total, (select count(*)::int from order_items where order_id=$1) as items, (select sum(amount) from payments where order_id=$1) as paid from orders where id=$1`, [o5])
+ok(o5row.items === 2 && Number(o5row.total) === round2((1500 + 300 - 100) * 1.18) && Number(o5row.paid) === 1000, `create_order: 2 ítems, precio del catálogo, total ${o5row.total}, anticipo ${o5row.paid}`)
+ok((await err(`select create_order($1, '[]')`, [JSON.stringify({ customer_id: cli, delivery_at: new Date().toISOString() })]))?.includes("al menos un producto"), "orden sin productos se rechaza")
+const q2 = await val(`select create_quote($1, $2)`, [JSON.stringify({ customer_id: cli }), JSON.stringify([{ product_id: galleta, quantity: 3, customization: "Sin nueces" }])])
+const o6 = await val(`select convert_quote_to_order($1, now() + interval '3 days')`, [q2])
+ok(await val(`select customization from order_items where order_id=$1`, [o6]) === "Sin nueces", "la personalización pasa de la cotización a la orden")
+const p3 = await val(`select save_product($1, $2)`, [
+  JSON.stringify({ name: "Brownie", price: 600, emoji: "🍫", recipe_yield: 6 }),
+  JSON.stringify([{ supply_id: harina, quantity: 200 }, { supply_id: azucar, quantity: 150 }]),
+])
+await db.query(`select save_product($1, $2)`, [JSON.stringify({ id: p3, name: "Brownie", price: 650, emoji: "🍫", recipe_yield: 6 }), JSON.stringify([{ supply_id: harina, quantity: 250 }])])
+const p3row = await one(`select price, emoji, (select count(*)::int from recipe_items where product_id=$1) as lines from products where id=$1`, [p3])
+ok(Number(p3row.price) === 650 && p3row.lines === 1 && p3row.emoji === "🍫", "save_product crea, edita y reemplaza la receta")
+const harinaAntesCompra = Number(await val(`select stock_on_hand from supplies where id=$1`, [harina]))
+await db.query(`select record_purchase($1, $2)`, [JSON.stringify({ supplier: "Mercado" }), JSON.stringify([{ supply_id: harina, quantity: 1000, total_cost: 50 }, { supply_id: huevos, quantity: 30, total_cost: 240 }])])
+ok(Number(await val(`select stock_on_hand from supplies where id=$1`, [harina])) === harinaAntesCompra + 1000, "record_purchase sube el stock de varios insumos")
+const c1 = await val(`select find_or_create_customer('Ana P.', '(809) 555-0000')`)
+const c2 = await val(`select find_or_create_customer('Nuevo Cliente', '829-111-2222')`)
+ok(c1 === cli && c2 !== cli, "find_or_create_customer reconoce el teléfono con otro formato")
+await db.exec(`update settings set itbis_enabled = false`)
+
+console.log("\n11. Correcciones")
+const rdToday = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santo_Domingo" }).format(new Date())
+const todayRd = await val(`select today_rd()::text`)
+ok(todayRd === rdToday, `today_rd() = ${todayRd} (hora de RD)`)
+ok((await val(`select column_default from information_schema.columns where table_name='invoices' and column_name='issued_on'`))?.includes("today_rd"), "las facturas toman la fecha de RD")
+await db.exec(`reset role`)
+const pendientes = Number(await val(`select count(*) from webhook_deliveries where status='pending'`))
+const claim1 = (await db.query(`select * from claim_webhook_deliveries(20)`)).rows.length
+const claim2 = (await db.query(`select * from claim_webhook_deliveries(20)`)).rows.length
+ok(claim1 === pendientes && claim1 > 0 && claim2 === 0, `un aviso reservado no se toma dos veces (${claim1} y luego ${claim2})`)
+await as(mom)
+ok((await err(`select * from claim_webhook_deliveries(20)`)) !== null, "los usuarios no pueden reservar avisos (solo el servidor)")
+
+console.log("\n12. Permisos")
 await as(intruder)
 ok(Number(await val(`select count(*) from orders`)) === 0, "usuario sin rol no ve órdenes")
 ok((await err(`insert into customers (name) values ('x')`)) !== null, "usuario sin rol no puede crear")

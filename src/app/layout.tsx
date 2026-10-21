@@ -1,7 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Fraunces, Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
-import { settings } from "@/lib/demo-data";
+import { RegisterServiceWorker } from "@/components/register-sw";
+import { APP_NAME, BRAND_COLOR } from "@/lib/brand";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -21,12 +22,13 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: settings.business_name,
+  title: { default: APP_NAME, template: `%s · ${APP_NAME}` },
   description: "Órdenes, inventario, cotizaciones y facturas",
+  appleWebApp: { capable: true, title: APP_NAME, statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#c0395a",
+  themeColor: BRAND_COLOR,
 };
 
 // Base de todas las páginas. El menú vive en (app)/layout.tsx, así el login no lo muestra.
@@ -39,6 +41,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full">
         {children}
         <Toaster position="top-center" richColors />
+        <RegisterServiceWorker />
       </body>
     </html>
   );
