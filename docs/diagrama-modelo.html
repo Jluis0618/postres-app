@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Modelo de datos</title>
+<style>
+  :root { --bg: #fbfaf7; --text: #2b2a27; --muted: #6b6a65; --border: #e3e1da; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1d1c1a; --text: #e8e6df; --muted: #a3a19a; --border: #3a3935; }
+  }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 24px 16px 8px; max-width: 1400px; margin: 0 auto; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+  p { margin: 0; color: var(--muted); font-size: 14px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; font-size: 13px; color: var(--muted); }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; background: var(--c); }
+  main { padding: 8px 16px 32px; max-width: 1400px; margin: 0 auto; }
+  h2 { font-size: 17px; font-weight: 600; margin: 28px 0 8px; }
+  .diagrama { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sistema de postres: modelo de datos</h1>
+  <p>v0.2. El detalle de cada columna y el glosario español → inglés están en docs/modelo-datos.md.</p>
+  <div class="legend">
+    <span style="--c:#c9a7e8">Catálogo e inventario</span>
+    <span style="--c:#9fd8c5">Ventas</span>
+    <span style="--c:#f2c08a">Integración</span>
+    <span style="--c:#c9c7bf">Configuración</span>
+  </div>
+</header>
+<main>
+  <h2>1. Catálogo e inventario</h2>
+  <div class="diagrama" id="inventario">Cargando…</div>
+  <h2>2. Ventas e integración</h2>
+  <div class="diagrama" id="ventas">Cargando…</div>
+  <h2>3. Configuración</h2>
+  <div class="diagrama" id="config">Cargando…</div>
+</main>
+
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+import elk from "https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.1.7/dist/mermaid-layout-elk.esm.min.mjs";
+
+const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+mermaid.registerLayoutLoaders(elk);
+mermaid.initialize({ startOnLoad: false, layout: "elk", theme: dark ? "dark" : "default" });
+
+const diagramas = {
+  inventario: `erDiagram
+  categories ||--o{ products : agrupa
+  products ||--o{ recipe_items : "su receta"
+  supplies ||--o{ recipe_items : "se usa en"
+  purchases ||--|{ purchase_items : contiene
+  supplies ||--o{ purchase_items : "se compra"
+  supplies ||--o{ supply_movements : historial
+  purchases ||--o{ supply_movements : genera
+  products ||--o{ product_movements : historial
+  orders ||--o{ supply_movements : consume
+  orders ||--o{ product_movements : "toma stock"
+  categories {
+    uuid id PK
+    text name
+    int sort_order
+  }
+  products {
+    uuid id PK
+    uuid category_id FK
+    text name
+    numeric price
+    text unit
+    bool track_stock
+    numeric stock_available
+    numeric recipe_yield
+    bool is_active
+  }
+  supplies {
+    uuid id PK
+    text name
+    enum unit "g ml unit"
+    numeric stock_on_hand ">= 0"
+    numeric min_stock
+    numeric unit_cost
+    text supplier
+    bool is_active
+  }
+  recipe_items {
+    uuid id PK
+    uuid product_id FK
+    uuid supply_id FK
+    numeric quantity
+  }
+  purchases {
+    uuid id PK
+    date purchased_on
+    text supplier
+    numeric total
+  }
+  purchase_items {
+    uuid id PK
+    uuid purchase_id FK
+    uuid supply_id FK
+    numeric quantity
+    numeric total_cost
+  }
+  supply_movements {
+    uuid id PK
+    uuid supply_id FK
+    enum type "purchase order_consumption order_return production adjustment waste"
+    numeric quantity
+    numeric unit_cost
+    uuid order_id FK
+    uuid purchase_id FK
+    text notes
+  }
+  product_movements {
+    uuid id PK
+    uuid product_id FK
+    enum type "production order_sale order_return adjustment waste"
+    numeric quantity
+    uuid order_id FK
+    text notes
+  }
+  orders {
+    uuid id PK
+  }`,
+  ventas: `erDiagram
+  customers ||--o{ quotes : recibe
+  customers ||--o{ orders : pide
+  customers ||--o{ invoices : "se le factura"
+  quotes ||--|{ quote_items : contiene
+  products ||--o{ quote_items : "se cotiza"
+  quotes |o--o| orders : "se convierte"
+  orders ||--|{ order_items : contiene
+  products ||--o{ order_items : "se vende"
+  orders ||--o| invoices : "se factura"
+  orders ||--o{ payments : abonos
+  orders ||--o{ webhook_deliveries : avisa
+  customers {
+    uuid id PK
+    text name
+    text phone
+    text email
+    text address
+    text tax_id "RNC"
+  }
+  quotes {
+    uuid id PK
+    text number "COT-0001"
+    uuid customer_id FK
+    date issued_on
+    date valid_until
+    enum status "draft sent accepted rejected expired"
+    numeric total
+    uuid order_id FK
+  }
+  quote_items {
+    uuid id PK
+    uuid quote_id FK
+    uuid product_id FK
+    text description
+    numeric quantity
+    numeric unit_price
+  }
+  orders {
+    uuid id PK
+    text number "ORD-0001"
+    uuid customer_id FK
+    uuid quote_id FK
+    timestamptz delivery_at
+    enum delivery_type "pickup delivery"
+    enum status "pending_confirmation pending in_preparation ready delivered cancelled"
+    enum source "manual commissions"
+    text external_ref
+    numeric total
+  }
+  order_items {
+    uuid id PK
+    uuid order_id FK
+    uuid product_id FK
+    numeric quantity
+    numeric unit_price
+    text customization
+    numeric qty_from_stock
+  }
+  invoices {
+    uuid id PK
+    text number "FAC-0001"
+    uuid order_id FK "unique"
+    uuid customer_id FK
+    date issued_on
+    numeric total
+    enum status "issued void"
+    enum payment_status "unpaid partial paid"
+    text ncf "futuro"
+  }
+  payments {
+    uuid id PK
+    uuid order_id FK
+    numeric amount
+    enum method "cash transfer card other"
+    timestamptz paid_at
+  }
+  webhook_deliveries {
+    uuid id PK
+    uuid order_id FK
+    text event "invoice.paid"
+    jsonb payload
+    enum status "pending sent failed"
+    int attempts
+  }
+  products {
+    uuid id PK
+  }`,
+  config: `erDiagram
+  settings {
+    text business_name
+    text tax_id "RNC"
+    text logo_url
+    bool itbis_enabled
+    numeric itbis_rate
+    int quote_validity_days
+  }
+  profiles {
+    uuid id PK "auth.users"
+    text name
+    enum role "admin assistant"
+  }`,
+};
+
+const grupos = {
+  catalogo: ["categories", "products", "supplies", "recipe_items", "purchases", "purchase_items", "supply_movements", "product_movements"],
+  ventas: ["customers", "quotes", "quote_items", "orders", "order_items", "invoices", "payments"],
+  integracion: ["webhook_deliveries"],
+  config: ["settings", "profiles"],
+};
+const tono = dark
+  ? { catalogo: "#4a3566", ventas: "#1f4d40", integracion: "#5c3f17", config: "#3a3935" }
+  : { catalogo: "#c9a7e8", ventas: "#9fd8c5", integracion: "#f2c08a", config: "#c9c7bf" };
+
+for (const [id, fuente] of Object.entries(diagramas)) {
+  const cont = document.getElementById(id);
+  const { svg } = await mermaid.render("svg-" + id, fuente);
+  cont.innerHTML = svg;
+  const el = cont.querySelector("svg");
+  el.style.maxWidth = "none";
+  el.setAttribute("width", el.viewBox.baseVal.width);
+  el.setAttribute("height", el.viewBox.baseVal.height);
+  cont.querySelectorAll("g[id^='entity-']").forEach((g) => {
+    const nombre = g.querySelector(".entityLabel")?.textContent.trim();
+    for (const [grupo, tablas] of Object.entries(grupos)) {
+      if (tablas.includes(nombre)) g.querySelector("rect").style.fill = tono[grupo];
+    }
+  });
+}
+</script>
+</body>
+</html>
