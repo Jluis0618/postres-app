@@ -71,7 +71,7 @@ La app es un proyecto Next.js normal. Dos opciones:
 
 **Vercel** (lo más simple; para un negocio corresponde el plan Pro según sus términos):
 1. Sube el proyecto a GitHub.
-2. En vercel.com → Add New Project → elige el repositorio. **Root Directory**: `postres-app`.
+2. En vercel.com → Add New Project → elige el repositorio. Deja **Root Directory** como viene: el repositorio ya empieza en la carpeta de la app.
 3. Pega las variables de entorno del paso 3. Deploy.
 
 **Cloudflare** (plan gratis que permite uso comercial): usa el adaptador OpenNext (`@opennextjs/cloudflare`). Requiere un poco más de configuración; se puede hacer cuando decidas publicar ahí.
