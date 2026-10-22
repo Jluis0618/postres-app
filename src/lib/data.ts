@@ -124,6 +124,37 @@ export async function getProduct(id: string) {
   return p ? { product: p, recipe: check(recipe) as RecipeItem[] } : null
 }
 
+export async function listProductMovements(productId: string) {
+  const supabase = await createClient()
+  return check(
+    await supabase
+      .from("product_movements")
+      .select("id, type, quantity, created_at, notes, order:orders(number)")
+      .eq("product_id", productId)
+      .order("created_at", { ascending: false })
+      .limit(40)
+  ) as unknown as Movement[]
+}
+
+export type ProductStockRow = Product & { reserved: number }
+
+/**
+ * Productos con su stock hecho y lo que ya está pedido en órdenes que todavía no se preparan
+ * (por confirmar o pendientes). Lo pedido se descuenta del stock cuando la orden pasa a preparación.
+ */
+export async function listProductStock() {
+  const supabase = await createClient()
+  const [products, open] = await Promise.all([
+    supabase.from("products").select("*").eq("is_active", true).order("name"),
+    supabase.from("order_items").select("product_id, quantity, order:orders!inner(status)").in("order.status", ["pending_confirmation", "pending"]),
+  ])
+  const reserved = new Map<string, number>()
+  for (const i of check(open) as unknown as { product_id: string | null; quantity: number }[]) {
+    if (i.product_id) reserved.set(i.product_id, (reserved.get(i.product_id) ?? 0) + Number(i.quantity))
+  }
+  return (check(products) as Product[]).map((p) => ({ ...p, reserved: reserved.get(p.id) ?? 0 }))
+}
+
 export async function listRecipeItems() {
   const supabase = await createClient()
   return check(await supabase.from("recipe_items").select("product_id, supply_id, quantity")) as (RecipeItem & { product_id: string })[]

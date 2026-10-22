@@ -7,7 +7,8 @@ export type QuoteStatus = "draft" | "sent" | "accepted" | "rejected" | "expired"
 export type PaymentStatus = "unpaid" | "partial" | "paid"
 export type PaymentMethod = "cash" | "transfer" | "card" | "other"
 export type DeliveryType = "pickup" | "delivery"
-export type MovementType = "purchase" | "order_consumption" | "order_return" | "production" | "adjustment" | "waste"
+// Movimientos de insumos y de productos hechos ("order_sale" solo existe en productos).
+export type MovementType = "purchase" | "order_consumption" | "order_return" | "production" | "adjustment" | "waste" | "order_sale"
 
 export type Settings = {
   business_name: string

@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { ChefHat, ChevronRight, MessageCircle, Plus, ShoppingCart } from "lucide-react"
+import { ChefHat, ChevronRight, History, MessageCircle, Plus, ShoppingCart, SlidersHorizontal, TriangleAlert } from "lucide-react"
 import { cn } from "cn"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -9,16 +9,18 @@ import { PageHeader } from "@/components/page-header"
 import { SegmentedLinks } from "@/components/segmented-links"
 import { StatusBadge } from "@/components/status-badge"
 import { requireStaff } from "@/lib/auth"
-import { getShoppingList, listCategories, listProducts, listRecipeItems, listSupplies, type ProductWithCost } from "@/lib/data"
+import { getShoppingList, listCategories, listProducts, listProductStock, listRecipeItems, listSupplies, type ProductStockRow, type ProductWithCost } from "@/lib/data"
 import { formatMoney, formatQty, formatUnitCost } from "@/lib/format"
 import type { Supply } from "@/lib/types"
 import { PurchaseDialog, SupplyDetailSheet, SupplyFormDialog } from "./supply-dialogs"
-import { ProductionDialog } from "./production-dialog"
+import { ProductionDialog, type ProductionLine } from "./production-dialog"
+import { ProductAdjustDialog, ProductHistorySheet } from "./product-stock-dialogs"
 
 export const metadata = { title: "Inventario" }
 
 const tabs = [
   { key: "insumos", label: "Insumos" },
+  { key: "stock", label: "Stock de productos" },
   { key: "productos", label: "Productos" },
   { key: "compras", label: "Lista de compras" },
 ] as const
@@ -45,7 +47,7 @@ export default async function InventoryPage({ searchParams }: PageProps<"/invent
                 <ShoppingCart /> Registrar compra
               </Button>
             </PurchaseDialog>
-            {tab === "productos" ? (
+            {tab === "productos" || tab === "stock" ? (
               <Button size="lg" className="h-11 px-4" asChild>
                 <Link href="/inventario/productos/nuevo">
                   <Plus /> Nuevo producto
@@ -68,6 +70,7 @@ export default async function InventoryPage({ searchParams }: PageProps<"/invent
         options={tabs.map((t) => ({ ...t, count: t.key === "compras" ? shopping.length : undefined }))}
       />
       {tab === "insumos" && <SuppliesTab supplies={supplies} />}
+      {tab === "stock" && <StockTab supplies={supplies} />}
       {tab === "productos" && <ProductsTab products={products} supplies={supplies} />}
       {tab === "compras" && <ShoppingTab list={shopping} />}
     </>
@@ -263,6 +266,133 @@ async function ProductsTab({ products, supplies }: { products: ProductWithCost[]
           </div>
         </section>
       ))}
+    </div>
+  )
+}
+
+// Productos ya hechos: cuántos hay, cuántos están pedidos y cuántos quedan libres.
+async function StockTab({ supplies }: { supplies: Supply[] }) {
+  const [rows, recipeItems] = await Promise.all([listProductStock(), listRecipeItems()])
+  const supplyById = new Map(supplies.map((s) => [s.id, s]))
+  const linesFor = (p: ProductStockRow): ProductionLine[] =>
+    recipeItems
+      .filter((r) => r.product_id === p.id)
+      .map((r) => {
+        const supply = supplyById.get(r.supply_id)!
+        return { name: supply.name, unit: supply.unit, perUnit: r.quantity / p.recipe_yield, available: Number(supply.stock_on_hand) }
+      })
+  const tracked = rows.filter((p) => p.track_stock)
+  const others = rows.filter((p) => !p.track_stock)
+
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        emoji="🧁"
+        title="Todavía no hay productos"
+        description="Crea tus productos primero; después aquí llevas cuántos tienes hechos."
+        action={
+          <Button size="lg" className="h-11" asChild>
+            <Link href="/inventario/productos/nuevo">
+              <Plus /> Crear producto
+            </Link>
+          </Button>
+        }
+      />
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-8">
+      <p className="text-muted-foreground">
+        Lo que ya tienes hecho. Cuando una orden pasa a preparación, toma primero de aquí; si se cancela, vuelve.
+      </p>
+
+      {tracked.length > 0 ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {tracked.map((p) => {
+            const stock = Number(p.stock_available)
+            const free = Math.max(stock - p.reserved, 0)
+            const short = p.reserved - stock
+            return (
+              <Card key={p.id} size="sm">
+                <CardContent className="flex flex-col gap-3">
+                  <div className="flex items-center gap-3">
+                    <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-accent text-2xl">{p.emoji}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-medium">{p.name}</div>
+                      <div className="text-sm text-muted-foreground">por {p.unit}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className={cn("font-heading text-3xl font-semibold tabular-nums", stock === 0 && "text-muted-foreground")}>{stock}</div>
+                      <div className="text-xs text-muted-foreground">hechos</div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 rounded-lg bg-muted/60 p-2 text-center text-xs">
+                    <div>
+                      <div className="text-muted-foreground">Pedidos pendientes</div>
+                      <div className="text-sm font-medium tabular-nums">{p.reserved}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Libres para vender</div>
+                      <div className="text-sm font-medium tabular-nums">{free}</div>
+                    </div>
+                  </div>
+                  {short > 0 && (
+                    <p className="flex items-center gap-1.5 rounded-lg bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                      <TriangleAlert className="size-3.5 shrink-0" /> Faltan {short} para cubrir los pedidos pendientes.
+                    </p>
+                  )}
+                  <div className="flex gap-2">
+                    <ProductionDialog product={p} lines={linesFor(p)}>
+                      <Button className="h-10 flex-1">
+                        <Plus /> Agregar
+                      </Button>
+                    </ProductionDialog>
+                    <ProductAdjustDialog product={p}>
+                      <Button variant="outline" className="h-10 flex-1">
+                        <SlidersHorizontal /> Ajustar
+                      </Button>
+                    </ProductAdjustDialog>
+                    <ProductHistorySheet product={p}>
+                      <Button variant="ghost" size="icon" className="size-10" aria-label={`Historial de ${p.name}`}>
+                        <History />
+                      </Button>
+                    </ProductHistorySheet>
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })}
+        </div>
+      ) : (
+        <EmptyState
+          emoji="🧁"
+          title="Ningún producto lleva stock todavía"
+          description="Toca “Agregar hechos” en un producto de abajo cuando tengas unidades listas. Desde ahí empieza a llevar la cuenta."
+        />
+      )}
+
+      {others.length > 0 && (
+        <section>
+          <h2 className="mb-1 font-heading text-lg font-semibold">Solo bajo pedido</h2>
+          <p className="mb-3 text-sm text-muted-foreground">Estos no llevan stock. Si hiciste algunos para tener listos, agrégalos.</p>
+          <Card className="py-1">
+            <CardContent className="flex flex-col divide-y px-3">
+              {others.map((p) => (
+                <div key={p.id} className="flex items-center gap-3 py-2.5">
+                  <span className="text-xl">{p.emoji}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{p.name}</span>
+                  <ProductionDialog product={p} lines={linesFor(p)}>
+                    <Button variant="outline" size="sm" className="h-9">
+                      <ChefHat /> Agregar hechos
+                    </Button>
+                  </ProductionDialog>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </section>
+      )}
     </div>
   )
 }

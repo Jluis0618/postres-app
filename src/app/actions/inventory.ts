@@ -1,6 +1,6 @@
 "use server"
 
-import { listSupplyMovements } from "@/lib/data"
+import { listProductMovements, listSupplyMovements } from "@/lib/data"
 import type { ActionResult, Missing, Movement, SupplyUnit } from "@/lib/types"
 import { fail, must, run, sessionClient } from "./helpers"
 
@@ -80,9 +80,11 @@ export async function getSupplyHistory(supplyId: string): Promise<ActionResult<M
   }
 }
 
-export async function adjustProductStock(input: { product_id: string; mode: "count" | "waste"; quantity: number; current: number }) {
+/** mode "count": quantity es lo que hay realmente. mode "waste": quantity es lo que se perdió. */
+export async function adjustProductStock(input: { product_id: string; mode: "count" | "waste"; quantity: number; note: string }) {
   return run(async () => {
     const supabase = await sessionClient()
+    // El conteo se compara con el stock de este momento, no con el que había al abrir la ventana.
     const { stock_available } = must(await supabase.from("products").select("stock_available").eq("id", input.product_id).single()) as { stock_available: number }
     const delta = input.mode === "count" ? input.quantity - Number(stock_available) : -input.quantity
     if (delta === 0) return
@@ -91,16 +93,40 @@ export async function adjustProductStock(input: { product_id: string; mode: "cou
         product_id: input.product_id,
         type: input.mode === "waste" ? "waste" : "adjustment",
         quantity: delta,
-        notes: input.mode === "waste" ? "Merma" : "Corrección de conteo",
+        notes: input.note.trim() || (input.mode === "waste" ? "Merma" : "Corrección de conteo"),
       })
     )
   })
 }
 
-export async function registerProduction(productId: string, quantity: number): Promise<ActionResult<{ missing?: Missing[] }>> {
+/** Activa o apaga el stock de un producto. Apagarlo solo se puede si no quedan unidades hechas. */
+export async function setProductTracking(productId: string, track: boolean) {
   return run(async () => {
     const supabase = await sessionClient()
-    const result = must(await supabase.rpc("register_production", { p_product_id: productId, p_quantity: quantity })) as {
+    if (!track) {
+      const { stock_available } = must(await supabase.from("products").select("stock_available").eq("id", productId).single()) as { stock_available: number }
+      if (Number(stock_available) > 0) throw new Error("Todavía hay unidades hechas. Ajusta el stock a 0 antes de dejar de llevarlo.")
+    }
+    must(await supabase.from("products").update({ track_stock: track }).eq("id", productId))
+  })
+}
+
+export async function getProductHistory(productId: string): Promise<ActionResult<Movement[]>> {
+  try {
+    await sessionClient()
+    return { ok: true, data: await listProductMovements(productId) }
+  } catch (error) {
+    return fail(error)
+  }
+}
+
+/** consumeSupplies: descontar los ingredientes de la receta (lo normal) o solo sumar al stock. */
+export async function registerProduction(productId: string, quantity: number, consumeSupplies = true): Promise<ActionResult<{ missing?: Missing[] }>> {
+  return run(async () => {
+    const supabase = await sessionClient()
+    const result = must(
+      await supabase.rpc("register_production", { p_product_id: productId, p_quantity: quantity, p_consume_supplies: consumeSupplies })
+    ) as {
       ok: boolean
       missing?: Missing[]
     }

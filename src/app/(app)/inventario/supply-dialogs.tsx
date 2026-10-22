@@ -465,7 +465,8 @@ export function AdjustmentDialog({ supply, children }: { supply: Supply; childre
 // Panel de detalle con historial (se abre al tocar un insumo)
 // ---------------------------------------------------------------------------
 
-const movementLabels: Record<MovementType, string> = {
+export const movementLabels: Record<MovementType, string> = {
+  order_sale: "Usado en orden",
   purchase: "Compra",
   order_consumption: "Usado en orden",
   order_return: "Devuelto de orden cancelada",

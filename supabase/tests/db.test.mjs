@@ -180,7 +180,29 @@ ok(claim1 === pendientes && claim1 > 0 && claim2 === 0, `un aviso reservado no s
 await as(mom)
 ok((await err(`select * from claim_webhook_deliveries(20)`)) !== null, "los usuarios no pueden reservar avisos (solo el servidor)")
 
-console.log("\n12. Permisos")
+console.log("\n12. Stock de productos")
+await as(mom)
+const flan = await val(`insert into products (name, price) values ('Flan', 1200) returning id`)
+const harinaAntesFlan = Number(await val(`select stock_on_hand from supplies where id=$1`, [harina]))
+await db.query(`insert into recipe_items (product_id, supply_id, quantity) values ($1, $2, 100)`, [flan, harina])
+r = await val(`select register_production($1, 5, false)`, [flan])
+const flanRow = await one(`select track_stock, stock_available from products where id=$1`, [flan])
+ok(r.ok && flanRow.track_stock === true && Number(flanRow.stock_available) === 5, "agregar sin descontar receta activa el stock y suma 5")
+ok(Number(await val(`select stock_on_hand from supplies where id=$1`, [harina])) === harinaAntesFlan, "sin descontar receta, la harina no cambia")
+r = await val(`select register_production($1, 2)`, [flan])
+ok(r.ok && Number(await val(`select stock_on_hand from supplies where id=$1`, [harina])) === harinaAntesFlan - 200, "con receta descuenta 200 g de harina")
+await db.query(`insert into product_movements (product_id, type, quantity, notes) values ($1, 'waste', -1, 'Se cayó')`, [flan])
+ok(Number(await val(`select stock_available from products where id=$1`, [flan])) === 6, "merma de 1: quedan 6")
+const o7 = await val(`select create_order($1, $2)`, [
+  JSON.stringify({ customer_id: cli, delivery_at: new Date(Date.now() + 86400000).toISOString() }),
+  JSON.stringify([{ product_id: flan, quantity: 4 }]),
+])
+await db.query(`select start_order_preparation($1)`, [o7])
+ok(Number(await val(`select stock_available from products where id=$1`, [flan])) === 2, "una orden de 4 flanes toma 4 del stock: quedan 2")
+await db.query(`select cancel_order($1)`, [o7])
+ok(Number(await val(`select stock_available from products where id=$1`, [flan])) === 6, "al cancelar, los 4 flanes vuelven: 6")
+
+console.log("\n13. Permisos")
 await as(intruder)
 ok(Number(await val(`select count(*) from orders`)) === 0, "usuario sin rol no ve órdenes")
 ok((await err(`insert into customers (name) values ('x')`)) !== null, "usuario sin rol no puede crear")
